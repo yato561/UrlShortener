@@ -66,5 +66,28 @@ public class UrlController {
 
         return urlService.delete(id, email);
     }
+    @Operation(summary = "Update an existing URL")
+    @PostMapping("/update/{id}")
+    public ResponseEntity<?> update(
+            @PathVariable Long id,
+            @RequestBody UrlRequest request,
+            HttpServletRequest httpRequest) {
+
+        String authHeader = httpRequest.getHeader("Authorization");
+
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.status(401).body("Missing or invalid token");
+        }
+
+        String token = authHeader.substring(7);
+        String email = jwtUtils.getEmailFromToken(token);
+
+        if (email == null) {
+            return ResponseEntity.status(401).body("Invalid or expired token");
+        }
+
+        return urlService.update(id, request, email);
+    }
+
 
 }

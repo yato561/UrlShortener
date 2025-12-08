@@ -7,4 +7,5 @@ public interface UrlService {
     ResponseEntity<?> create(UrlRequest request, String currentUserEmail);
     ResponseEntity<?> getAll(String currentUserEmail);
     ResponseEntity<?> delete(Long id, String currentUserEmail);
+    ResponseEntity<?> update(Long id, UrlRequest request, String currentUserEmail);
 }

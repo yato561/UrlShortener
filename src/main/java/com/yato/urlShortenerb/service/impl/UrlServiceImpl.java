@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -105,6 +106,38 @@ public class UrlServiceImpl implements UrlService {
 
         return ResponseEntity.ok("Deleted");
     }
+    @Override
+    public ResponseEntity<?> update(Long id, UrlRequest request, String currentUserEmail) {
 
+        User user = userRepo.findByEmail(currentUserEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Url url = urlRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("URL not found"));
+
+        if (!url.getUser().getId().equals(user.getId())) {
+            return ResponseEntity.status(403).body("Forbidden");
+        }
+
+        // Update only if longUrl is provided
+        if (request.longUrl() != null && !request.longUrl().isBlank()) {
+            url.setLongUrl(request.longUrl());
+        }
+
+        // Handle expiry
+        if (request.expiry() != null && !request.expiry().isBlank()) {
+            try {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
+                LocalDateTime expiry = LocalDateTime.parse(request.expiry(), formatter);
+                url.setExpiry(expiry);
+            } catch (Exception e) {
+                return ResponseEntity.badRequest().body("Invalid expiry format");
+            }
+        }
+
+        urlRepo.save(url);
+
+        return ResponseEntity.ok("URL updated successfully");
+    }
 
 }
