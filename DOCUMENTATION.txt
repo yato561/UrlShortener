@@ -1103,7 +1103,554 @@ export JWT_EXPIRATION_MS=86400000
 
 ---
 
-17. Project Structure Summary
+17. NEW FEATURES
+
+Feature 1: Analytics & Click Tracking
+
+src/main/java/com/yato/urlShortenerb/entity/AnalyticsEvent.java
+
+Purpose: Track individual click events with metadata
+
+Entity Name: analytics_events
+Columns:
+  - id (BIGINT, Primary Key)
+  - url_id (BIGINT, Foreign Key to urls)
+  - user_agent (VARCHAR) - Browser/device info
+  - ip_address (VARCHAR) - Visitor IP
+  - referrer (VARCHAR) - HTTP referrer
+  - clicked_at (TIMESTAMP) - When URL was clicked
+  - country (VARCHAR) - Geo-location country
+  - device_type (VARCHAR) - Mobile/Desktop/Tablet
+
+src/main/java/com/yato/urlShortenerb/repo/AnalyticsEventRepo.java
+
+Custom Methods:
+- findByUrlId(Long urlId) - Get all clicks for a URL
+- countByUrlIdAndClickedAtBetween(Long urlId, LocalDateTime start, LocalDateTime end)
+  - Count clicks within date range
+- findByUrlIdOrderByClickedAtDesc(Long urlId) - Get recent clicks
+
+src/main/java/com/yato/urlShortenerb/service/AnalyticsService.java
+
+Interface Methods:
+- recordClick(String shortCode, HttpServletRequest request) - Log new click
+- getAnalytics(Long urlId) - Get analytics dashboard data
+- getClicksByDateRange(Long urlId, LocalDateTime start, LocalDateTime end)
+  - Get clicks in specific period
+
+src/main/java/com/yato/urlShortenerb/service/impl/AnalyticsServiceImpl.java
+
+Method: recordClick(String shortCode, HttpServletRequest request)
+Steps:
+1. Find URL by short code
+2. Extract from request:
+   - User-Agent (browser info)
+   - Client IP address
+   - Referrer header
+   - Parse device type from User-Agent
+3. Optional: Geo-locate IP using MaxMind or IP geolocation API
+4. Create AnalyticsEvent entity
+5. Save to database
+6. Increment URL click count
+
+Endpoint: GET /analytics/{urlId}
+Authentication: Required (owner only)
+Response:
+{
+  "urlId": 1,
+  "shortCode": "aBc1234",
+  "totalClicks": 45,
+  "uniqueVisitors": 32,
+  "avgClicksPerDay": 3.2,
+  "topReferrers": ["google.com", "twitter.com"],
+  "deviceBreakdown": {
+    "mobile": 25,
+    "desktop": 18,
+    "tablet": 2
+  },
+  "countriesData": [
+    {"country": "US", "clicks": 20},
+    {"country": "IN", "clicks": 15}
+  ]
+}
+
+---
+
+Feature 2: URL Expiration & Automatic Cleanup
+
+Expiration Logic in Url Entity:
+
+@Column(name = "expiry")
+private LocalDateTime expiry;
+
+Database Query Optimization:
+- Index on expiry column for fast filtering
+- Scheduled task to delete expired URLs
+
+Scheduled Task Implementation:
+
+@Component
+public class UrlExpirationTask {
+    
+    @Scheduled(cron = "0 0 * * * *")  // Every hour
+    public void deleteExpiredUrls() {
+        List<Url> expiredUrls = urlRepo.findByExpiryBefore(LocalDateTime.now());
+        expiredUrls.forEach(url -> {
+            analyticsEventRepo.deleteByUrlId(url.getId());
+            urlRepo.delete(url);
+        });
+        log.info("Deleted {} expired URLs", expiredUrls.size());
+    }
+}
+
+RedirectController Enhancement:
+
+Method: redirect(String shortCode)
+Steps:
+1. Find URL by short code
+2. Check if URL has expiry date
+3. If expired: return 410 Gone (Permanently unavailable)
+4. If not expired: proceed with redirect
+5. Record analytics event
+
+Response for expired URL (410):
+{
+  "error": "URL expired",
+  "expiredAt": "2025-12-31T23:59:00"
+}
+
+---
+
+Feature 3: Bulk URL Operations
+
+New Endpoints:
+
+POST /urls/bulk/create
+Purpose: Create multiple shortened URLs in one request
+
+Request Body:
+{
+  "urls": [
+    {
+      "longUrl": "https://example1.com",
+      "title": "Example 1",
+      "expiry": "2025-12-31T23:59"
+    },
+    {
+      "longUrl": "https://example2.com",
+      "title": "Example 2"
+    }
+  ]
+}
+
+Response (200):
+{
+  "created": 2,
+  "results": [
+    {
+      "longUrl": "https://example1.com",
+      "shortCode": "aBc1234",
+      "status": "success"
+    },
+    {
+      "longUrl": "https://example2.com",
+      "shortCode": "xYz5678",
+      "status": "success"
+    }
+  ]
+}
+
+DELETE /urls/bulk/delete
+Request Body:
+{
+  "ids": [1, 2, 3]
+}
+
+Response (200):
+{
+  "deleted": 3,
+  "message": "Successfully deleted 3 URLs"
+}
+
+POST /urls/bulk/export
+Export all user URLs as JSON or CSV
+
+---
+
+Feature 4: API Rate Limiting
+
+Implementation using Spring Cloud Gateway or Bucket4j:
+
+Configuration in SecurityConfig:
+
+@Bean
+public RateLimiter rateLimiter() {
+    return new RateLimiter(
+        requestsPerMinute: 60,
+        requestsPerHour: 1000,
+        requestsPerDay: 10000
+    );
+}
+
+Rate Limit Headers in Response:
+
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 55
+X-RateLimit-Reset: 1702563780
+
+Error Response (429):
+{
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded: 60 requests per minute",
+  "retryAfter": 45
+}
+
+Rate Limits by Endpoint:
+- POST /auth/register: 5 requests per hour
+- POST /auth/login: 10 requests per hour
+- POST /urls/create: 100 requests per day
+- GET /urls/all: 60 requests per minute
+- GET /s/{shortCode}: Unlimited (public)
+
+---
+
+Feature 5: Caching Strategy
+
+Redis Caching Implementation:
+
+Dependencies:
+- spring-boot-starter-data-redis
+- jedis (or lettuce)
+
+Configuration in application.properties:
+
+spring.cache.type=redis
+spring.redis.host=localhost
+spring.redis.port=6379
+spring.cache.redis.time-to-live=3600000
+
+Caching Annotations:
+
+@Cacheable(value = "url", key = "#shortCode", unless = "#result == null")
+public Url findByShortCode(String shortCode) {
+    return urlRepo.findByShortCode(shortCode);
+}
+
+@CacheEvict(value = "url", key = "#shortCode")
+public void updateUrl(String shortCode, UrlRequest request) {
+    // Update logic
+}
+
+Cached Data:
+- Short Code → URL mapping (most frequently accessed)
+- User → URLs list (expires after 30 minutes)
+- Analytics summaries (expires after 1 hour)
+
+Cache Hit Benefits:
+- Redirect response time: 5-10ms (vs 50-100ms without cache)
+- Database load reduction: 70-80% for redirects
+- Analytics aggregation queries are pre-computed
+
+---
+
+Feature 6: QR Code Generation
+
+New Endpoint: GET /urls/{id}/qrcode
+Response: PNG image of QR code
+
+Implementation:
+
+Dependencies:
+- com.google.zxing:core
+- com.google.zxing:javase
+
+Service Method:
+
+@Service
+public class QrCodeService {
+    
+    public BufferedImage generateQRCode(String shortUrl, int width, int height) 
+        throws WriterException {
+        QRCodeWriter qrCodeWriter = new QRCodeWriter();
+        BitMatrix bitMatrix = qrCodeWriter.encode(
+            shortUrl, 
+            BarcodeFormat.QR_CODE, 
+            width, 
+            height
+        );
+        return MatrixToImageWriter.toBufferedImage(bitMatrix);
+    }
+}
+
+Controller Endpoint:
+
+@GetMapping("/{id}/qrcode")
+public ResponseEntity<byte[]> getQRCode(
+    @PathVariable Long id,
+    @RequestParam(defaultValue = "300") int size
+) {
+    Url url = urlService.getUrl(id);
+    BufferedImage qrImage = qrCodeService.generateQRCode(
+        "https://yourdomain.com/s/" + url.getShortCode(),
+        size,
+        size
+    );
+    
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    ImageIO.write(qrImage, "png", baos);
+    
+    return ResponseEntity.ok()
+        .contentType(MediaType.IMAGE_PNG)
+        .body(baos.toByteArray());
+}
+
+Usage:
+- Display QR code in analytics dashboard
+- Allow users to download QR code for print materials
+- Share QR code on social media
+
+---
+
+Feature 7: Custom Short Codes (Vanity URLs)
+
+New Endpoint: POST /urls/custom
+Request Body:
+{
+  "longUrl": "https://example.com/very/long/url",
+  "customCode": "mycode123",
+  "expiry": "2025-12-31T23:59"
+}
+
+Validation:
+- Custom code 3-50 characters alphanumeric
+- Must not already exist
+- Cannot contain reserved words (/auth, /admin, etc.)
+- Must pass regex: ^[a-zA-Z0-9_-]{3,50}$
+
+Service Method:
+
+public ResponseEntity<?> createCustomUrl(UrlRequest request, String customCode) {
+    // Validate custom code
+    if (!isValidCustomCode(customCode)) {
+        return ResponseEntity.badRequest().body("Invalid custom code");
+    }
+    
+    // Check if code already taken
+    if (urlRepo.findByShortCode(customCode).isPresent()) {
+        return ResponseEntity.status(409).body("Custom code already taken");
+    }
+    
+    // Create URL with custom code
+    Url url = new Url();
+    url.setShortCode(customCode);
+    // ... set other fields
+    urlRepo.save(url);
+    
+    return ResponseEntity.ok(new UrlResponse(...));
+}
+
+---
+
+Feature 8: URL Tags & Categories
+
+New Entity: UrlTag
+
+@Entity
+@Table(name = "url_tags")
+public class UrlTag {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    private User user;
+    
+    @Column(unique = true)
+    private String name;
+    
+    @ManyToMany(mappedBy = "tags")
+    private Set<Url> urls = new HashSet<>();
+}
+
+Updated Url Entity:
+
+@ManyToMany
+@JoinTable(
+    name = "url_tags_mapping",
+    joinColumns = @JoinColumn(name = "url_id"),
+    inverseJoinColumns = @JoinColumn(name = "tag_id")
+)
+private Set<UrlTag> tags = new HashSet<>();
+
+New Endpoints:
+
+POST /tags/create
+{
+  "name": "social-media",
+  "color": "#FF5733"
+}
+
+GET /urls/filter?tags=social-media,marketing
+
+DELETE /tags/{tagId}
+
+---
+
+Feature 9: User Subscription Plans
+
+New Entity: Subscription
+
+@Entity
+@Table(name = "subscriptions")
+public class Subscription {
+    @Id
+    private Long id;
+    
+    @OneToOne
+    @JoinColumn(name = "user_id")
+    private User user;
+    
+    @Enumerated(EnumType.STRING)
+    private PlanType plan; // FREE, BASIC, PREMIUM, ENTERPRISE
+    
+    private Integer urlsLimit;
+    private Integer analyticsRetention; // days
+    private Boolean customDomainsAllowed;
+    private Boolean apiAccessAllowed;
+    private LocalDateTime createdAt;
+    private LocalDateTime expiresAt;
+}
+
+Plan Features:
+
+FREE:
+- URLs limit: 10
+- Analytics retention: 7 days
+- Custom codes: No
+- API access: No
+
+BASIC:
+- URLs limit: 100
+- Analytics retention: 30 days
+- Custom codes: Yes
+- API access: Yes
+- Price: $5/month
+
+PREMIUM:
+- URLs limit: 1000
+- Analytics retention: 365 days
+- Custom codes: Yes
+- API access: Yes
+- Custom domains: Yes
+- Price: $15/month
+
+ENTERPRISE:
+- Unlimited URLs
+- Unlimited analytics retention
+- Custom domains
+- Priority support
+- Custom price
+
+Service Validation:
+
+@Service
+public class SubscriptionService {
+    
+    public boolean canCreateUrl(User user) {
+        Subscription sub = user.getSubscription();
+        int urlCount = urlRepo.countByUserId(user.getId());
+        return urlCount < sub.getUrlsLimit();
+    }
+    
+    public List<AnalyticsEvent> getAnalyticsWithinRetention(Long urlId) {
+        User user = urlRepo.findById(urlId).get().getUser();
+        int retentionDays = user.getSubscription().getAnalyticsRetention();
+        LocalDateTime cutoffDate = LocalDateTime.now().minusDays(retentionDays);
+        return analyticsEventRepo.findByUrlIdAndClickedAtAfter(urlId, cutoffDate);
+    }
+}
+
+---
+
+Feature 10: API Documentation & Webhooks
+
+Webhook Support:
+
+New Entity: Webhook
+
+@Entity
+@Table(name = "webhooks")
+public class Webhook {
+    @Id
+    @GeneratedValue
+    private Long id;
+    
+    @ManyToOne
+    private User user;
+    
+    private String callbackUrl;
+    
+    @Enumerated(EnumType.STRING)
+    private WebhookEvent event; // URL_CREATED, URL_CLICKED, URL_DELETED
+    
+    private Boolean active;
+    private LocalDateTime createdAt;
+}
+
+Webhook Events:
+
+// Event: URL_CREATED
+{
+  "event": "url.created",
+  "timestamp": "2025-12-14T10:30:00Z",
+  "data": {
+    "id": 1,
+    "shortCode": "aBc1234",
+    "longUrl": "https://example.com",
+    "userId": 5
+  }
+}
+
+// Event: URL_CLICKED
+{
+  "event": "url.clicked",
+  "timestamp": "2025-12-14T10:35:00Z",
+  "data": {
+    "shortCode": "aBc1234",
+    "ipAddress": "192.168.1.1",
+    "userAgent": "Mozilla/5.0...",
+    "country": "US"
+  }
+}
+
+Implementation:
+
+@Service
+public class WebhookService {
+    
+    public void triggerWebhook(WebhookEvent event, Object data) {
+        List<Webhook> webhooks = webhookRepo.findByEventAndActive(event, true);
+        
+        for (Webhook webhook : webhooks) {
+            try {
+                webClient.post()
+                    .uri(webhook.getCallbackUrl())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(new WebhookPayload(event, data))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .subscribe();
+            } catch (Exception e) {
+                log.error("Webhook failed for: {}", webhook.getId(), e);
+            }
+        }
+    }
+}
+
+---
+
+18. Project Structure Summary
 
 urlShortenerb/
 ├── src/
