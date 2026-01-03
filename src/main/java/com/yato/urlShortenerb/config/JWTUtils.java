@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
 @Component
@@ -18,7 +19,7 @@ public class JWTUtils {
     private long jwtExpirationMs;
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(jwtSecret.getBytes());
+        return Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
     }
 
     public String generateToken(String subject) {
@@ -46,7 +47,9 @@ public class JWTUtils {
                     .build()
                     .parseClaimsJws(token);
             return true;
-        } catch (JwtException ex) {
+        } catch (ExpiredJwtException ex) {
+            return false;
+        } catch (JwtException | IllegalArgumentException ex) {
             return false;
         }
     }

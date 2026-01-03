@@ -1,61 +1,74 @@
 package com.yato.urlShortenerb.config;
 
-import com.yato.urlShortenerb.config.JWTUtils;
-import com.yato.urlShortenerb.config.JwtAuthFilter;
-import com.yato.urlShortenerb.service.impl.UserDetailsServiceImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+
+import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JWTUtils jwtUtils;
-    private final UserDetailsServiceImpl userDetailsService;
-
-    @Bean
-    public JwtAuthFilter jwtAuthFilter() {
-        return new JwtAuthFilter(jwtUtils, userDetailsService);
-    }
+    private final JwtAuthFilter jwtAuthFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
-        http.csrf(csrf -> csrf.disable())
+        http
+                .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(request -> {
-                    var corsConfig = new org.springframework.web.cors.CorsConfiguration();
-                    corsConfig.setAllowCredentials(true);
-                    corsConfig.setAllowedOrigins(
-                            java.util.List.of("http://localhost:5174", "http://localhost:5173")
-                    );
-                    corsConfig.setAllowedMethods(
-                            java.util.List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
-                    );
-                    corsConfig.setAllowedHeaders(
-                            java.util.List.of("Authorization", "Content-Type", "Accept")
-                    );
-                    corsConfig.setExposedHeaders(
-                            java.util.List.of("Authorization")
-                    );
-                    return corsConfig;
+                    CorsConfiguration config = new CorsConfiguration();
+                    config.setAllowCredentials(true);
+                    config.setAllowedOrigins(List.of(
+                            "http://localhost:5173",
+                            "http://localhost:5174",
+                            "https://your-frontend.vercel.app" // 🔴 ADD THIS
+                    ));
+                    config.setAllowedMethods(List.of(
+                            "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
+                    ));
+                    config.setAllowedHeaders(List.of(
+                            "Authorization", "Content-Type", "Accept"
+                    ));
+                    config.setExposedHeaders(List.of("Authorization"));
+                    return config;
                 }))
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/**", "/v3/api-docs/**",
-                                "/swagger-ui/**", "/swagger-ui.html",
-                                "/s/**")
-                        .permitAll()
+                        .requestMatchers(
+                                "/auth/**",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/s/**"        // short URLs
+                        ).permitAll()
                         .anyRequest().authenticated()
-                );
-
-        http.addFilterBefore(jwtAuthFilter(), UsernamePasswordAuthenticationFilter.class);
+                )
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(
+            AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
     }
 }
