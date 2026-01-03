@@ -32,7 +32,7 @@ public class SecurityConfig {
                     config.setAllowedOrigins(List.of(
                             "http://localhost:5173",
                             "http://localhost:5174",
-                            "https://your-frontend.vercel.app" // 🔴 ADD THIS
+                            "https://url-shortenerf.vercel.app" // 🔴 ADD THIS
                     ));
                     config.setAllowedMethods(List.of(
                             "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
