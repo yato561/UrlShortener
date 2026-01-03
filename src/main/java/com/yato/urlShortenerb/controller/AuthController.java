@@ -46,23 +46,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Invalid credentials")
     })
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(
-            @RequestBody LoginRequest request
-    ) {
-
+    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
         log.info("Login endpoint called for {}", request.email());
-
-        // 🔐 Authenticate using Spring Security
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.email(),
-                        request.password()
-                )
-        );
-
-        // 🎟 Generate JWT after successful authentication
-        String token = jwtUtils.generateToken(request.email());
-
-        return ResponseEntity.ok(new AuthResponse(token));
+        return userService.login(request);
     }
 }
