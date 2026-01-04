@@ -75,7 +75,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         response.put("totalUrls",totalUrls);
         response.put("topUrl",topUrls);
         response.put("dailyClicks",dailyClicks);
-        response.put("devices",devices);
+        response.put("devices",deviceStats);
         response.put("referrers",deviceStats);
         response.put("breakdown",breakdown);
 
